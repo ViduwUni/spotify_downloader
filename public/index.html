@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Spotify Playlist Downloader</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f0f8ff;
+            padding: 40px;
+            text-align: center;
+        }
+
+        input,
+        button {
+            padding: 10px;
+            font-size: 16px;
+            margin: 5px;
+        }
+
+        #songList {
+            margin-top: 30px;
+            text-align: left;
+            max-width: 700px;
+            margin-inline: auto;
+        }
+
+        .song {
+            border-bottom: 1px solid #ccc;
+            padding: 10px 0;
+        }
+
+        #progress {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2>🎧 Spotify Playlist Downloader</h2>
+    <input type="text" id="playlistURL" placeholder="Paste Spotify Playlist URL here" size="60" />
+    <br>
+    <button onclick="fetchPlaylist()">Fetch Playlist</button>
+    <button onclick="startDownload()" disabled id="downloadBtn">Download ZIP</button>
+
+    <div id="songList"></div>
+    <div id="progress" style="display: none;">
+        <progress id="downloadProgress" value="0" max="100"></progress>
+        <span id="progressText">0%</span>
+    </div>
+
+    <script>
+        let songs = [];
+        let playlistId = "";
+
+        function extractPlaylistId(url) {
+            const match = url.match(/playlist\/([a-zA-Z0-9]+)/);
+            const id = match ? match[1] : null;
+            console.log("Extracted playlist ID:", id);
+            return id;
+        }
+
+        async function fetchPlaylist() {
+            const input = document.getElementById("playlistURL").value;
+            playlistId = extractPlaylistId(input);
+            const songListDiv = document.getElementById("songList");
+            const downloadBtn = document.getElementById("downloadBtn");
+
+            songListDiv.innerHTML = "";
+            downloadBtn.disabled = true;
+
+            if (!playlistId) {
+                console.warn("Invalid playlist URL entered.");
+                songListDiv.innerText = "❌ Invalid playlist URL";
+                return;
+            }
+
+            try {
+                console.log("Fetching playlist data from server...");
+                const res = await axios.get(`/playlist/${playlistId}`);
+                songs = res.data;
+
+                console.log("Songs received from server:", songs);
+
+                if (songs.length === 0) {
+                    songListDiv.innerText = "⚠️ No songs found in playlist.";
+                    return;
+                }
+
+                songListDiv.innerHTML = `<h3>📃 Songs in Playlist:</h3>` +
+                    songs.map((s, i) => `<div class="song">🎵 <strong>${s.title}</strong> – ${s.artist}</div>`).join("");
+
+                downloadBtn.disabled = false;
+                console.log("Playlist displayed and download button enabled.");
+            } catch (err) {
+                console.error("Error fetching playlist:", err);
+                songListDiv.innerText = "❌ Error fetching playlist songs.";
+            }
+        }
+
+        function startDownload() {
+            const progressDiv = document.getElementById("progress");
+            const progressBar = document.getElementById("downloadProgress");
+            const progressText = document.getElementById("progressText");
+
+            progressDiv.style.display = "block";  // Make progress bar visible
+            progressBar.value = 0; // Reset the progress bar
+            progressText.innerText = "0%";  // Reset the text
+
+            const evtSource = new EventSource(`/playlist/${playlistId}/download/stream`);
+
+            evtSource.onmessage = (event) => {
+                const data = JSON.parse(event.data); // Parse the JSON message
+
+                if (data.status === "DOWNLOADING") {
+                    // Update progress bar and text
+                    const percentage = Math.round((data.current / data.total) * 100);
+                    progressBar.value = percentage;
+                    progressText.innerText = `${percentage}%`;
+                }
+
+                if (data.status === "DONE") {
+                    evtSource.close();
+                    progressText.innerText = "Download complete!";
+                    setTimeout(() => {
+                        window.location.href = `/playlist/${playlistId}/zip`;  // Download the ZIP file
+                    }, 1000);
+                }
+
+                if (data.status === "ERROR") {
+                    progressText.innerText = "❌ Error occurred!";
+                    evtSource.close();
+                }
+            };
+
+            evtSource.onerror = () => {
+                progressText.innerText = "❌ Error during download process.";
+                evtSource.close();
+            };
+        }
+    </script>
+</body>
+
+</html>
